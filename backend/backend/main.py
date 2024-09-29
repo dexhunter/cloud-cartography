@@ -5,6 +5,10 @@ import numpy as np
 from datetime import datetime
 from fastapi import FastAPI
 from fastapi.logger import logger
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import json
+import uvicorn
 
 app = FastAPI()
 
@@ -88,7 +92,7 @@ def create_graph(follow_info):
             # Add an edge from the user to the target
             G.add_edge(fid, target_fid, timestamp=timestamp)
     
-    print(f"Created graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
+    logger.info(f"Created graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
     return G
 
 def calculate_graph_metrics(graph: nx.MultiDiGraph, start_time: datetime, end_time: datetime):
@@ -97,10 +101,10 @@ def calculate_graph_metrics(graph: nx.MultiDiGraph, start_time: datetime, end_ti
         if start_time <= d.get('timestamp', 0) <= end_time
     ])
     
-    print(f"Filtered graph has {filtered_graph.number_of_nodes()} nodes and {filtered_graph.number_of_edges()} edges")
+    logger.info(f"Filtered graph has {filtered_graph.number_of_nodes()} nodes and {filtered_graph.number_of_edges()} edges")
     
     if filtered_graph.number_of_nodes() == 0 or filtered_graph.number_of_edges() == 0:
-        print("Warning: Filtered graph is empty. Check your time range and data.")
+        logger.warning("Filtered graph is empty. Check your time range and data.")
         return None  # or return some default metrics
     
     adj_matrix = nx.adjacency_matrix(filtered_graph).todense()
@@ -123,30 +127,32 @@ def calculate_graph_metrics(graph: nx.MultiDiGraph, start_time: datetime, end_ti
         'shortest_path_matrix': shortest_path_matrix
     }
 
-# Example usage
+@app.get("/api/graph_data")
+async def get_graph_data(start_time: int, end_time: int):
+    # Assuming you have a way to get or store the full graph data
+    full_graph = create_graph(get_user_follow_info(get_user_fids(parse_usernames("balajis,dexhunter,feides"))))
+    
+    metrics = calculate_graph_metrics(full_graph, datetime.fromtimestamp(start_time), datetime.fromtimestamp(end_time))
+    
+    if metrics is None:
+        return {"error": "No data available for the specified time range"}
+    
+    return {
+        "nodes": [{"id": node, "username": data.get("username", "")} for node, data in full_graph.nodes(data=True)],
+        "links": [{"source": u, "target": v, "timestamp": d["timestamp"]} for u, v, d in full_graph.edges(data=True)],
+        "metrics": {
+            "num_edges": metrics["num_edges"],
+            "adjacency_matrix": json.dumps(metrics["adjacency_matrix"].tolist()),
+            "shortest_path_matrix": json.dumps(metrics["shortest_path_matrix"].tolist())
+        }
+    }
+
+# Serve static files (HTML, CSS, JS)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+async def read_index():
+    return FileResponse("static/index.html")
+
 if __name__ == "__main__":
-    usernames = "balajis,dexhunter,feides"
-    
-    # Test the functions
-    parsed_usernames = parse_usernames(usernames)
-    print(f"Parsed usernames: {parsed_usernames}")
-
-    user_fids = get_user_fids(parsed_usernames)
-    print(f"User FIDs: {user_fids}")
-
-    user_data = get_user_data(user_fids)
-    print(f"User data: {user_data}")
-
-    follow_info = get_user_follow_info(user_fids)
-    print(f"Follow info: {follow_info}")
-
-    graph = create_graph(follow_info)
-    
-    # Calculate metrics for a specific time range
-    start_time = min(follow['timestamp'] for user in follow_info for follow in user['following'])
-    end_time = max(follow['timestamp'] for user in follow_info for follow in user['following'])
-    metrics = calculate_graph_metrics(graph, start_time, end_time)
-    
-    print(f"Number of edges: {metrics['num_edges']}")
-    print(f"Adjacency matrix:\n{metrics['adjacency_matrix']}")
-    print(f"Shortest path matrix:\n{metrics['shortest_path_matrix']}")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
