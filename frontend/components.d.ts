@@ -8,6 +8,5 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     Graph: typeof import('./src/components/graph.vue')['default']
-    Visualizer: typeof import('./src/components/Visualizer.vue')['default']
   }
 }

@@ -3,23 +3,62 @@ import httpx
 import networkx as nx
 import numpy as np
 from datetime import datetime, timezone
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.logger import logger
 import logging
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 import json
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import ssl
 import certifi
+from fastapi.websockets import WebSocketDisconnect
+import asyncio
+import os
+
+connected_clients = set()
+
+class WebSocketLogHandler(logging.Handler):
+    def __init__(self, loop):
+        super().__init__()
+        self.loop = loop
+
+    def emit(self, record):
+        log_entry = self.format(record)
+        # Schedule the asynchronous sending of the log entry safely from any thread
+        self.loop.call_soon_threadsafe(
+            asyncio.create_task, self._send_log_to_clients(log_entry)
+        )
+
+    async def _send_log_to_clients(self, log_entry):
+        disconnected_clients = set()
+        for websocket in connected_clients.copy():
+            try:
+                await websocket.send_text(log_entry)
+            except WebSocketDisconnect:
+                disconnected_clients.add(websocket)
+            except Exception as e:
+                logger.error(f"Error sending log to websocket: {str(e)}")
+                disconnected_clients.add(websocket)
+        connected_clients.difference_update(disconnected_clients)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+# Obtain the current event loop
+loop = asyncio.get_event_loop()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+websocket_handler = WebSocketLogHandler(loop)
+websocket_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger.addHandler(websocket_handler)
 
 # Allow requests from your frontend at http://localhost:3000
 origins = [
@@ -315,12 +354,28 @@ async def get_graph_data(request: UsernameRequest):
         logger.error(f"An error occurred: {str(e)}")
         return {"error": str(e)}
 
-# Serve static files (HTML, CSS, JS)
-# app.mount("/static", StaticFiles(directory="static"), name="static")
+@app.websocket("/ws/logs")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    connected_clients.add(websocket)
+    try:
+        while True:
+            # Keep the connection open
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        connected_clients.remove(websocket)
 
-# @app.get("/")
-# async def read_index():
-#     return FileResponse("static/index.html")
+
+
+# Serve static files from the dist directory
+app.mount("/", StaticFiles(directory="dist", html=True), name="static")
+
+# Keep your catch-all route
+@app.get("/{full_path:path}")
+async def catch_all(full_path: str):
+    return FileResponse("dist/index.html")
+
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, ws="websockets")

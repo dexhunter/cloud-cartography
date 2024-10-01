@@ -1,5 +1,6 @@
 <template>
   <v-card class="pa-4 ma-4" elevation="2">
+    <!-- User Input Form -->
     <v-form @submit.prevent="submitUsernames">
       <v-text-field
         v-model="userInput"
@@ -15,6 +16,17 @@
         Enter
       </v-btn>
     </v-form>
+
+    <!-- Real-time Backend Logs -->
+    <v-card v-if="isConnected" class="mt-4 mb-4 pa-4" outlined>
+      <h3>Real-time Backend Logs</h3>
+      <v-btn @click="backendLogs = []" color="secondary" small class="mb-2">
+        Clear Logs
+      </v-btn>
+      <div class="log-container">
+        <pre v-for="(log, index) in backendLogs" :key="index">{{ log }}</pre>
+      </div>
+    </v-card>
 
     <!-- Time Slider -->
     <v-slider
@@ -70,17 +82,6 @@
       <p><strong>Start Time:</strong> {{ formatDate(timestamps[0]) }}</p>
       <p><strong>End Time:</strong> {{ formatDate(timestamps[timestamps.length - 1]) }}</p>
     </v-card>
-
-    <!-- Real-time Backend Logs -->
-    <v-card v-if="isConnected" class="mt-4 pa-4" outlined>
-      <h3>Real-time Backend Logs</h3>
-      <v-btn @click="backendLogs = []" color="secondary" small class="mb-2">
-        Clear Logs
-      </v-btn>
-      <div class="log-container">
-        <pre v-for="(log, index) in backendLogs" :key="index">{{ log }}</pre>
-      </div>
-    </v-card>
   </v-card>
 </template>
 
@@ -108,45 +109,45 @@ export default {
     }
   },
   methods: {
-    submitUsernames() {
+    async submitUsernames() {
       console.log('Submitting usernames:', this.userInput);
       this.backendLogs = []; // Clear previous logs
 
-      // API call to fetch graph data
-      fetch("http://localhost:8000/api/graph_data", {
-        method: "POST",
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ usernames: this.userInput })
-      })
-        .then(response => response.json())
-        .then(data => {
-          if (data.error) {
-            console.error(data.error);
-          } else {
-            // Update to handle the new data structure
-            this.graphData = data.graph_structure;
-            this.metrics = data.graph_metrics;  // Now contains additional metrics
-            this.timestamps = data.timestamps.sort((a, b) => a - b);
-
-            // Set the initial time index
-            this.selectedTimeIndex = 0;
-
-            // Initialize the graph
-            this.updateGraph();
-          }
-        })
-        .catch(error => {
-          console.error("Error fetching graph data:", error);
+      try {
+        // Use a relative URL instead of an absolute one
+        const response = await fetch("/api/graph_data", {
+          method: "POST",
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ usernames: this.userInput })
         });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+          console.error(data.error);
+        } else {
+          this.graphData = data.graph_structure;
+          this.metrics = data.graph_metrics;
+          this.timestamps = data.timestamps.sort((a, b) => a - b);
+
+          this.selectedTimeIndex = 0;
+          this.updateGraph();
+        }
+      } catch (error) {
+        console.error("Error fetching graph data:", error);
+      }
     },
     updateGraph() {
       if (!this.graphData || !this.graphData.links) {
         console.error("Graph data is undefined");
         return;
       }
-
       const currentTime = this.timestamps[this.selectedTimeIndex];
       console.log("Current Time:", currentTime);
 
@@ -356,24 +357,25 @@ export default {
       return matrix.map(row => row.join(' ')).join('\n');
     },
     connectWebSocket() {
+      console.log('Attempting to connect to WebSocket...');
       this.socket = new WebSocket('ws://localhost:8000/ws/logs');
       
       this.socket.onopen = () => {
-        console.log('WebSocket connected');
+        console.log('WebSocket connected successfully');
         this.isConnected = true;
       };
       
       this.socket.onmessage = (event) => {
-        const log = event.data;
-        this.backendLogs.push(log);
+        console.log('Received message:', event.data);
+        this.backendLogs.push(event.data);
         // Optionally, limit the number of logs displayed
         if (this.backendLogs.length > 100) {
           this.backendLogs.shift();
         }
       };
       
-      this.socket.onclose = () => {
-        console.log('WebSocket disconnected');
+      this.socket.onclose = (event) => {
+        console.log('WebSocket disconnected:', event);
         this.isConnected = false;
       };
       
@@ -416,9 +418,10 @@ export default {
 }
 
 .log-container {
-  max-height: 300px;
+  max-height: 200px; /* Adjust the height as needed */
   overflow-y: auto;
-  background-color: #f5f5f5;
+  background-color: #000; /* Black background */
+  color: #fff; /* White font color */
   padding: 10px;
   border-radius: 4px;
 }
@@ -429,5 +432,6 @@ export default {
   font-size: 14px;
   white-space: pre-wrap;
   word-wrap: break-word;
+  color: #fff; /* Ensure font color is white */
 }
 </style>

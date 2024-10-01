@@ -10,6 +10,7 @@ import { fileURLToPath, URL } from 'node:url'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: '/', // Set base to root
   plugins: [
     Vue({
       template: { transformAssetUrls },
@@ -41,7 +42,8 @@ export default defineConfig({
       '.vue',
     ],
   },
-  server: {
-    port: 3000,
+  server: { 
+    host: '0.0.0.0',
+    port: 8000,
   },
 })
